@@ -135,9 +135,6 @@ Proof.
       + apply StableSing.
 Qed.
 
-Axiom axiom_K_is_stable :
-    forall (T : Type), forall (w : FreeMonT (WithInv T)), forall (p1 p2 : is_stable w), p1 = p2.
-
 Definition DecEq (T : Type) : Type := forall (a b : T), { a = b } + { a <> b }.
 
 Lemma deceq_within { T : Type } (deceq : DecEq T) : DecEq (WithInv T).
