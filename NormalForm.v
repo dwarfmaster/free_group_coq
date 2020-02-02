@@ -71,12 +71,19 @@ Qed.
 Theorem unicity_of_fully_reduction { T : Type }:
     forall (x n n' : FreeMonT (WithInv T)),
         trefl_closure (Reduction T) x n -> trefl_closure (Reduction T) x n' ->
-            normal_form (trefl_closure (Reduction T)) n ->
-                normal_form (trefl_closure (Reduction T)) n' -> n = n'.
+            normal_form (Reduction T) n ->
+                normal_form (Reduction T) n' -> n = n'.
 Proof.
-    apply confluence_unicity_of_normal_form.
-    apply strongly_confluent_closure.
-    apply reduction_strongly_confluent.
+    intros x n n' Hxn Hxn' Hnfn Hnfn'.
+    pose (strongly_confluent_closure _ (reduction_strongly_confluent T)) as Hsconfl.
+    destruct (Hsconfl x n n' Hxn Hxn') as [ Heq | [ Hnn' | [ Hn'n | [ rd H ] ] ] ].
+    - assumption.
+    - destruct Hnn'; try reflexivity. exfalso. apply (Hnfn b). assumption.
+    - destruct Hn'n; try reflexivity. exfalso. apply (Hnfn' b). assumption.
+    - destruct H as [ Hredn Hredn' ]. destruct Hredn; destruct Hredn'; try reflexivity.
+      + exfalso. apply (Hnfn' b). assumption.
+      + exfalso. apply (Hnfn b). assumption.
+      + exfalso. apply (Hnfn b). assumption.
 Qed.
 
 Fixpoint inv { T : Type } (x : WithInv T) : WithInv T
@@ -186,6 +193,140 @@ Proof.
     apply (well_founded_ind (reduction_normalizing T)).
     apply nf_exists'. assumption.
 Qed.
+
+Fixpoint liftEq { T : Type } (deceq : T -> T -> bool) (x y : WithInv T) : bool
+    := match x, y with
+     | Reg    _ a, Reg    _ b => deceq a b
+     | ForInv _ a, ForInv _ b => deceq a b
+     | _,          _          => false
+    end.
+
+Fixpoint reduce { T : Type } (deceq : T -> T -> bool) (x : FreeMonT (WithInv T)) : FreeMonT (WithInv T) :=
+    let witheq : WithInv T -> WithInv T -> bool := liftEq deceq in
+    match x with
+    | (App _ a w) => let reduced : FreeMonT (WithInv T) := reduce deceq w in
+            match reduced with
+            | (App _ b w') => if (witheq (inv a) b)
+                                then w'
+                                else (App (WithInv T) a (App (WithInv T) b w'))
+            | Empty _      => App (WithInv T) a (Empty (WithInv T))
+            end
+    | Empty _ => Empty (WithInv T)
+    end.
+
+Definition DecEqCorrect { T : Type } (deceq : T -> T -> bool) : Prop
+    := forall (a b : T), a = b <-> deceq a b = true.
+
+Lemma lifteq_correct { T : Type } (deceq : T -> T -> bool) :
+    forall (Hc : DecEqCorrect deceq), DecEqCorrect (liftEq deceq).
+Proof.
+    intros Hc a b. split. 
+    - destruct a; destruct b; intro Heq; inversion Heq.
+      + simpl. apply Hc. reflexivity.
+      + simpl. apply Hc. reflexivity.
+    - destruct a; destruct b; intro Heq; simpl in Heq; inversion Heq.
+      + apply Hc in Heq. rewrite Heq. reflexivity.
+      + apply Hc in Heq. rewrite Heq. reflexivity.
+Qed.
+
+Lemma inv_red { T : Type } :
+    forall (a b : WithInv T), forall (w : FreeMonT (WithInv T)),
+        inv a = b -> Reduction T (App _ a (App _ b w)) w.
+Proof.
+    intros a b w Heq. destruct a.
+    - rewrite <- Heq. apply RightRed.
+    - rewrite <- Heq. apply LeftRed.
+Qed.
+
+Lemma inv_invo { T : Type } :
+    forall (a : WithInv T), inv (inv a) = a.
+Proof.
+    destruct a; reflexivity.
+Qed.
+
+Lemma inv_apply { T : Type } :
+    forall (a b : WithInv T), inv a = b <-> a = inv b.
+Proof.
+    intros a b. destruct a; destruct b; split; intro Heq; inversion Heq; reflexivity.
+Qed.
+
+Lemma trefl_ctx_red { T : Type } :
+    forall (a : WithInv T), forall (w w' : FreeMonT (WithInv T)),
+        trefl_closure (Reduction T) w w' -> trefl_closure (Reduction T) (App _ a w) (App _ a w').
+Proof.
+    intros a w w' Hred. induction Hred.
+    - constructor.
+    - apply (TransClosure (Reduction T) _ (App (WithInv T) a b)); try assumption.
+      apply CtxRed. assumption.
+Qed.
+
+Lemma trefl_red_inject { T : Type } (R : T -> T -> Prop) :
+    forall (a b : T), R a b -> trefl_closure R a b.
+Proof.
+    intros a b Hred. apply (TransClosure R _ b); try assumption. constructor.
+Qed.
+
+Theorem reduce_is_reduction { T : Type } (deceq : T -> T -> bool) (decC : DecEqCorrect deceq) :
+    forall (x : FreeMonT (WithInv T)), trefl_closure (Reduction T) x (reduce deceq x).
+Proof.
+    intro x. induction x.
+    - simpl. remember (reduce deceq x) as red. destruct red.
+      + remember (liftEq deceq (inv t) w) as test. destruct test.
+        { symmetry in Heqtest. apply (lifteq_correct deceq decC) in Heqtest.
+          apply (trefl_closure_append (FreeMonT (WithInv T)) (Reduction T)
+                    _ (App (WithInv T) t (App (WithInv T) w red))).
+          - apply trefl_ctx_red. assumption.
+          - apply trefl_red_inject. apply inv_red. assumption.
+        }
+        { apply trefl_ctx_red. assumption. }
+      + apply trefl_ctx_red. assumption.
+    - simpl. constructor.
+Qed.
+
+Lemma eq_is_neq { T : Type } (deceq : T -> T -> bool) (eqdecC : DecEqCorrect deceq) :
+    forall (a b : T), a <> b <-> deceq a b = false.
+Proof.
+    intros a b. split; intro H.
+    - remember (deceq a b) as test. destruct test; try reflexivity.
+      exfalso. apply H. apply eqdecC. symmetry. assumption.
+    - intro Heq. apply eqdecC in Heq. rewrite -> H in Heq. inversion Heq.
+Qed.
+
+Theorem reduce_is_stable { T : Type } (deceq : T -> T -> bool) (decC : DecEqCorrect deceq) :
+    forall (x : FreeMonT (WithInv T)), is_stable (reduce deceq x).
+Proof.
+    intro x. induction x.
+    - simpl. remember (reduce deceq x) as red. destruct red; try constructor.
+      remember (liftEq deceq (inv t) w) as test. destruct test.
+      + apply stable_is_normal_form. apply (normal_form_sub w).
+        apply stable_is_normal_form. assumption.
+      + symmetry in Heqtest. apply (eq_is_neq (liftEq deceq) (lifteq_correct deceq decC)) in Heqtest.
+        constructor; assumption.
+    - constructor.
+Qed.
+
+Corollary reduce_is_normal_form { T : Type } (deceq : T -> T -> bool) (decC : DecEqCorrect deceq) :
+    forall (x : FreeMonT (WithInv T)), normal_form (Reduction T) (reduce deceq x).
+Proof.
+    intro x. apply stable_is_normal_form. apply reduce_is_stable. assumption.
+Qed.
+
+Definition normal_form_of { T : Type } (R : T -> T -> Prop) (x y : T) : Prop
+    := trefl_closure R x y /\ normal_form R y.
+
+Theorem reduce_is_unique_normal_form { T : Type } (deceq : T -> T -> bool) (decC : DecEqCorrect deceq) :
+    forall (x y : FreeMonT (WithInv T)),
+        normal_form_of (Reduction T) x y <-> y = reduce deceq x.
+Proof.
+    intros x y. split.
+    - intro Hnf. destruct Hnf. apply (unicity_of_fully_reduction x); try assumption.
+      + apply reduce_is_reduction. assumption.
+      + apply reduce_is_normal_form. assumption.
+    - intro Hred. rewrite -> Hred. split.
+      + apply reduce_is_reduction. assumption.
+      + apply reduce_is_normal_form. assumption.
+Qed.
+
 
 
 
