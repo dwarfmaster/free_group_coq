@@ -244,6 +244,123 @@ Qed.
 Let FreeGroup (T : Type) (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq)
     := mkGrp (FreeGroupMon T deceq deceqC) (inverse deceq deceqC) (inverse_correct deceq deceqC).
 
+Definition liftF { T : Type } { G : Group } (f : T -> gtype G) (x : WithInv T) : gtype G
+    := match x with
+     | Reg _ a => f a
+     | ForInv _ a => inve G (f a)
+    end.
+
+Definition freegrpmap { T : Type } { G : Group } (f : T -> gtype G) (x : FreeGrpT T) : gtype G
+    := freemonmap' (WithInv T) (base G) (liftF f) (forgetGrp x).
+
+Lemma reduction_preserves_map { T : Type } { G : Group }:
+    forall (f : T -> gtype G), forall (x y : FreeMonT (WithInv T)),
+        Reduction T x y -> freemonmap' _ _ (liftF f) x = freemonmap' _ _ (liftF f) y.
+Proof.
+    intros f x y Hred. remember x as ex. remember y as ey.
+    generalize dependent x. generalize dependent y. induction Hred; intros a Ha b Hb.
+    - simpl.
+      rewrite (associativity (base G)). destruct (invCorrect G (f x)) as [ _ Hinv ]. rewrite Hinv.
+      destruct (emptyCorrect (base G) (freemonmap' _ (base G) (liftF f) tl)) as [ _ Hneutral ].
+      rewrite Hneutral. reflexivity.
+    - simpl. rewrite (associativity (base G)). destruct (invCorrect G (f x)) as [ Hinv _ ].
+      rewrite Hinv. destruct (emptyCorrect (base G) (freemonmap' _ (base G) (liftF f) tl)) as [ _ Hneutral ].
+      rewrite Hneutral. reflexivity.
+    - simpl. rewrite (IHHred m' (eq_refl m') m (eq_refl m)). reflexivity.
+Qed.
+
+Lemma trefl_reduction_preserves_map { T : Type } { G : Group }:
+    forall (f : T -> gtype G), forall (x y : FreeMonT (WithInv T)),
+        trefl_closure (Reduction T) x y -> freemonmap' _ _ (liftF f) x = freemonmap' _ _ (liftF f) y.
+Proof.
+    intros f x y Hred. induction Hred; try reflexivity.
+    rewrite <- IHHred. apply reduction_preserves_map.
+    assumption.
+Qed.
+
+Lemma freegrpmap_is_monoid_morphism { T : Type } { G : Group }
+        (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq):
+    forall (f : T -> gtype G), is_monoid_morphism (FreeGroupMon T deceq deceqC) (base G) (freegrpmap f).
+Proof.
+    intro f. unfold is_monoid_morphism. split.
+    - simpl. reflexivity.
+    - intros x y. unfold freegrpmap.
+      pose (freemonmap_is_morphism (WithInv T) (base G) (liftF f)) as Hmorph.
+      destruct Hmorph as [ _ Hmorph ].
+      unfold forgetGrp. simpl. unfold forgetGrp.
+      assert (forall (a b : FreeMonT (WithInv T)), freemonmap' _ _ (liftF f) (reduce deceq (append a b))
+                = freemonmap' _ _ (liftF f) (op (FreeMonoid.FreeMon (WithInv T)) a b)) as H.
+      { intros a b. symmetry. apply trefl_reduction_preserves_map. simpl.
+        apply reduce_is_reduction. assumption. }
+      rewrite -> H. rewrite Hmorph. reflexivity.
+Qed.
+
+Let makeFreeGrpMonMorphism { T : Type } { G : Group } (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq)
+        (f : T -> gtype G) : MonoidMorphism (FreeGroupMon T deceq deceqC) (base G)
+    := mkMonMorphism (FreeGroupMon T deceq deceqC) (base G)
+                     (freegrpmap f) (freegrpmap_is_monoid_morphism deceq deceqC f).
+
+Lemma carac_inverse { G : Group } :
+    forall (x y : gtype G), gop G x y = unit G -> inve G x = y.
+Proof.
+    intros x y Hinv. symmetry.
+    assert (gop G (inve G x) (gop G x y) = gop G (inve G x) (unit G)) as Heq.
+    { rewrite Hinv. reflexivity. }
+    destruct (invCorrect G x) as [ _ HinvC ]. pose (associativity (base G) (inve G x) x y) as Hass.
+    unfold gop in Heq. rewrite -> Hass in Heq. rewrite -> HinvC in Heq.
+    clear HinvC. clear Hass. destruct (emptyCorrect (base G) y) as [ _ Hey ].
+    destruct (emptyCorrect (base G) (inve G x)) as [ Hinve _ ].
+    rewrite Hey in Heq. unfold unit in Heq. rewrite Hinve in Heq. assumption.
+Qed.
+
+Lemma eq_under_f (T T' : Type) :
+    forall (f : T -> T'), forall (a b : T), a = b -> f a = f b.
+Proof.
+    intros f a b Heq. rewrite Heq. reflexivity.
+Qed.
+
+Lemma freegrpmap_is_group_morphism { T : Type } { G : Group }
+        (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq):
+    forall (f : T -> gtype G),
+        is_group_morphism (FreeGroup T deceq deceqC) G (makeFreeGrpMonMorphism deceq deceqC f).
+Proof.
+    intro f. unfold is_group_morphism. intro x. simpl.
+    symmetry. apply carac_inverse.
+    destruct (freegrpmap_is_monoid_morphism deceq deceqC f) as [ Hunit Hop ].
+    unfold gop. rewrite <- Hop. unfold unit. rewrite <- Hunit. apply eq_under_f.
+    destruct (inverse_correct deceq deceqC x) as [ Hleft Hright ]. assumption.
+Qed.
+
+Let makeFreeGrpMorphism { T : Type } { G : Group } (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq)
+        (f : T -> gtype G) : GroupMorphism (FreeGroup T deceq deceqC) G
+    := mkGrpMor (FreeGroup T deceq deceqC) G
+                (makeFreeGrpMonMorphism deceq deceqC f)
+                (freegrpmap_is_group_morphism deceq deceqC f).
+
+Let applyOnGrpBasis { T : Type } { G : Group } (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq)
+        (m : (FreeGrpT T) -> gtype G) (x : T) : gtype G
+    := m (makeGrp deceq deceqC (App _ (Reg _ x) (Empty _))).
+
+Theorem free_group_is_free_group { T : Type } (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq) :
+    is_free_group_over T (FreeGroup T deceq deceqC).
+Proof.
+    unfold is_free_group_over. intro G.
+    exists (makeFreeGrpMorphism deceq deceqC). exists (applyOnGrpBasis deceq deceqC). split.
+
+    - intro f. apply functionnal_extensionality. intro x.
+      unfold applyOnGrpBasis. unfold makeFreeGrpMorphism. unfold makeGrp.
+      unfold makeFreeGrpMonMorphism. unfold grpmor. simpl. unfold freegrpmap. simpl.
+      destruct (emptyCorrect (base G) (f x)) as [ Hempty _ ]. assumption.
+
+      (* TODO finish proof *)
+    - intro h. apply functionnal_extensionality. intro x.
+      unfold makeFreeGrpMorphism. unfold applyOnGrpBasis. unfold makeFreeGrpMonMorphism.
+      unfold makeGrp. unfold freegrpmap. unfold grpmor. unfold forgetGrp. simpl.
+      remember (elem T x) as e. generalize dependent x. induction e; intro a; simpl.
+      + intro Heq.
+
+    
+
 
 
 
