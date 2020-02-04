@@ -341,6 +341,46 @@ Let applyOnGrpBasis { T : Type } { G : Group } (deceq : T -> T -> bool) (deceqC 
         (m : (FreeGrpT T) -> gtype G) (x : T) : gtype G
     := m (makeGrp deceq deceqC (App _ (Reg _ x) (Empty _))).
 
+Lemma propagate_is_stable { T : Type } :
+    forall (m : FreeMonT (WithInv T)), forall (x : WithInv T),
+        is_stable (App _ x m) -> is_stable m.
+Proof.
+    intros m x Happ. inversion Happ; try assumption. constructor.
+Qed.
+
+Theorem distribute_group_morphism { T : Type } (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq) :
+    forall (G : Group), forall (h : GroupMorphism (FreeGroup T deceq deceqC) G),
+    forall (a b : FreeMonT (WithInv T)), forall (x y z : FreeGrpT T),
+        elem T x = a -> elem T y = b -> elem T z = reduce deceq (append a b)
+            -> gop G (grpmor h x) (grpmor h y) = grpmor h z.
+Proof.
+    intros G h a b x y z Hxa Hyb Happ.
+    assert (elem T (gop (FreeGroup T deceq deceqC) x y) = reduce deceq (append a b)) as Hxy.
+    { unfold FreeGroup. unfold FreeGroupMon. unfold gop. simpl.
+      unfold forgetGrp. rewrite -> Hxa. rewrite -> Hyb. reflexivity. }
+    rewrite <- Hxy in Happ. apply eq_freegrp in Happ.
+    rewrite -> Happ. clear Happ. clear Hxy.
+    assert (is_monoid_morphism _ _ (grpmor h)) as [ _ Hmorph ].
+    { apply monmor_correct. }
+    unfold gop. rewrite <- Hmorph. reflexivity.
+Qed.
+
+Lemma inv_singleton { T : Type } (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq) :
+    forall (t : T),
+        makeGrp deceq deceqC (App _ (ForInv _ t) (Empty _))
+            = inve (FreeGroup T deceq deceqC) (makeGrp deceq deceqC (App _ (Reg _ t) (Empty _))).
+Proof.
+    intro t. unfold FreeGroup. simpl. apply eq_freegrp.
+    unfold makeGrp. unfold inverse. simpl. reflexivity.
+Qed.
+
+Lemma reduce_stable { T : Type } (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq):
+    forall (x : FreeMonT (WithInv T)), is_stable x -> x = reduce deceq x.
+Proof.
+    intros x Hstable. apply reduce_is_unique_normal_form; try assumption.
+    split; try constructor. apply stable_is_normal_form. assumption.
+Qed.
+
 Theorem free_group_is_free_group { T : Type } (deceq : T -> T -> bool) (deceqC : DecEqCorrect deceq) :
     is_free_group_over T (FreeGroup T deceq deceqC).
 Proof.
@@ -352,16 +392,36 @@ Proof.
       unfold makeFreeGrpMonMorphism. unfold grpmor. simpl. unfold freegrpmap. simpl.
       destruct (emptyCorrect (base G) (f x)) as [ Hempty _ ]. assumption.
 
-      (* TODO finish proof *)
     - intro h. apply functionnal_extensionality. intro x.
-      unfold makeFreeGrpMorphism. unfold applyOnGrpBasis. unfold makeFreeGrpMonMorphism.
-      unfold makeGrp. unfold freegrpmap. unfold grpmor. unfold forgetGrp. simpl.
-      remember (elem T x) as e. generalize dependent x. induction e; intro a; simpl.
-      + intro Heq.
-
-    
-
-
+      destruct x as [ x Hx ]. induction x; simpl.
+      + unfold makeFreeGrpMorphism. unfold makeFreeGrpMonMorphism. unfold grpmor at 1. simpl.
+        unfold freegrpmap. unfold forgetGrp. simpl.
+        unfold makeFreeGrpMorphism in IHx. unfold makeFreeGrpMonMorphism in IHx. unfold grpmor at 1 in IHx.
+        simpl in IHx. unfold freegrpmap in IHx. unfold forgetGrp in IHx. simpl in IHx.
+        rewrite -> (IHx (propagate_is_stable x t Hx)).
+        remember ({| elem := App _ t x; elemNormal := Hx |}) as z.
+        assert (elem T z = append (App _ t (Empty _)) x) as Hz.
+        { rewrite Heqz. simpl. reflexivity. }
+        rewrite <- (distribute_group_morphism deceq deceqC G h (App _ t (Empty _)) x
+                                              (makeGrp deceq deceqC (App _ t (Empty _)))
+                                              ({| elem := x; elemNormal := propagate_is_stable x t Hx |}) z).
+        * unfold liftF. unfold gop. unfold applyOnGrpBasis. destruct t; try reflexivity.
+          rewrite -> inv_singleton. pose (morbase_correct _ _ h) as Hmorph.
+          unfold is_group_morphism in Hmorph. unfold grpmor. rewrite Hmorph. reflexivity.
+        * unfold makeGrp. simpl. reflexivity.
+        * reflexivity.
+        * rewrite Hz. apply reduce_stable; assumption.
+      + unfold makeFreeGrpMorphism. unfold morbase. unfold grpmor. simpl.
+        unfold freegrpmap. simpl.
+        remember ({| elem := Empty (WithInv T); elemNormal := Hx |}) as e.
+        assert (e = empty (base (FreeGroup T deceq deceqC))) as Hunit.
+        { apply eq_freegrp. rewrite Heqe. unfold FreeGroup. unfold FreeGroupMon. simpl. reflexivity. }
+        rewrite Hunit. clear Heqe. clear Hunit.
+        destruct (monmor_correct _ _ (morbase _ _ h)) as [ Hmorph _ ].
+        unfold FreeGroup at 1 in Hmorph. simpl in Hmorph.
+        unfold FreeGroup at 2. unfold FreeGroupMon at 2. simpl.
+        rewrite Hmorph. reflexivity.
+Qed.
 
 
 
